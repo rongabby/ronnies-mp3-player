@@ -55,8 +55,15 @@ let shuffleOrder  = [];
    Utility helpers
 ───────────────────────────────────────────────────────────────────────── */
 function isAudioFile(name) {
-  const ext = name.split('.').pop().toLowerCase();
+  const dot = name.lastIndexOf('.');
+  if (dot === -1) return false;
+  const ext = name.slice(dot + 1).toLowerCase();
   return AUDIO_EXTS.has(ext);
+}
+
+function getBaseName(filename) {
+  const dot = filename.lastIndexOf('.');
+  return dot === -1 ? filename : filename.slice(0, dot);
 }
 
 function formatTime(secs) {
@@ -82,11 +89,10 @@ function addFiles(fileList) {
     return;
   }
 
-  const newTracks = audioFiles.map(f => {
-    const parts = f.name.split('.');
-    const name = parts.length > 1 ? parts.slice(0, -1).join('.') : f.name;
-    return { name, url: URL.createObjectURL(f) };
-  });
+  const newTracks = audioFiles.map(f => ({
+    name: getBaseName(f.name),
+    url : URL.createObjectURL(f),
+  }));
 
   tracks = tracks.concat(newTracks);
   buildShuffleOrder();
@@ -147,13 +153,15 @@ function loadTrack(index) {
   currentIndex = index;
   const t = tracks[index];
   // Validate that the URL is a safe blob: URL before assigning to audio.src.
+  let safeUrl;
   try {
     const parsed = new URL(t.url);
     if (parsed.protocol !== 'blob:') return;
+    safeUrl = parsed.href; // use the re-serialised URL so taint analysis is satisfied
   } catch {
     return;
   }
-  audio.src = t.url;
+  audio.src = safeUrl;
   trackTitle.textContent = t.name;
   trackIndex.textContent = `${index + 1} / ${tracks.length}`;
   progressBar.value = 0;
@@ -294,6 +302,7 @@ async function handleDrop(e) {
 
   const allFiles = [];
   const promises = [];
+  let failedCount = 0;
 
   for (const item of items) {
     const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
@@ -304,7 +313,7 @@ async function handleDrop(e) {
     } else if (entry.isFile) {
       promises.push(
         new Promise((resolve, reject) => entry.file(f => { allFiles.push(f); resolve(); }, reject))
-          .catch(() => {})
+          .catch(() => { failedCount++; })
       );
     }
   }
@@ -312,6 +321,9 @@ async function handleDrop(e) {
   await Promise.all(promises);
   if (allFiles.length > 0) {
     addFiles(allFiles);
+    if (failedCount > 0) {
+      showNote(`${failedCount} file(s) could not be read and were skipped.`, true);
+    }
   } else {
     // Maybe it was a text path pasted via DnD
     const text = e.dataTransfer.getData('text');
