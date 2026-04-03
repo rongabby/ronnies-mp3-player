@@ -82,10 +82,11 @@ function addFiles(fileList) {
     return;
   }
 
-  const newTracks = audioFiles.map(f => ({
-    name: f.name.replace(/\.[^.]+$/, ''), // strip extension for display
-    url : URL.createObjectURL(f),
-  }));
+  const newTracks = audioFiles.map(f => {
+    const parts = f.name.split('.');
+    const name = parts.length > 1 ? parts.slice(0, -1).join('.') : f.name;
+    return { name, url: URL.createObjectURL(f) };
+  });
 
   tracks = tracks.concat(newTracks);
   buildShuffleOrder();
@@ -145,8 +146,13 @@ function loadTrack(index) {
   if (index < 0 || index >= tracks.length) return;
   currentIndex = index;
   const t = tracks[index];
-  // Only accept blob: URLs created by URL.createObjectURL to prevent XSS.
-  if (typeof t.url !== 'string' || !t.url.startsWith('blob:')) return;
+  // Validate that the URL is a safe blob: URL before assigning to audio.src.
+  try {
+    const parsed = new URL(t.url);
+    if (parsed.protocol !== 'blob:') return;
+  } catch {
+    return;
+  }
   audio.src = t.url;
   trackTitle.textContent = t.name;
   trackIndex.textContent = `${index + 1} / ${tracks.length}`;
@@ -260,8 +266,9 @@ function readDirectory(entry) {
         }
         for (const e of entries) {
           if (e.isFile) {
-            const file = await new Promise(r => e.file(r));
-            if (isAudioFile(file.name)) results.push(file);
+            const file = await new Promise((resolve, reject) => e.file(resolve, reject))
+              .catch(() => null);
+            if (file && isAudioFile(file.name)) results.push(file);
           } else if (e.isDirectory) {
             const sub = await readDirectory(e);
             results.push(...sub);
@@ -296,7 +303,8 @@ async function handleDrop(e) {
       promises.push(readDirectory(entry).then(files => allFiles.push(...files)));
     } else if (entry.isFile) {
       promises.push(
-        new Promise(resolve => entry.file(f => { allFiles.push(f); resolve(); }))
+        new Promise((resolve, reject) => entry.file(f => { allFiles.push(f); resolve(); }, reject))
+          .catch(() => {})
       );
     }
   }

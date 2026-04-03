@@ -42,6 +42,6 @@ No build step or server is required.
 | Key | Action |
 |-----|--------|
 | Space | Play / Pause |
-| ← | Previous track (or restart if > 3 s in) |
+| ← | Previous track (or restart if more than 3 seconds into the track) |
 | → | Next track |
 | Ctrl+V | Paste folder path from clipboard |
