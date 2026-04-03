@@ -260,33 +260,36 @@ async function readClipboardText() {
 
 /**
  * Recursively read a FileSystemDirectoryEntry and collect audio File objects.
+ * Returns { files, failedCount } where failedCount counts unreadable entries.
  */
-function readDirectory(entry) {
-  return new Promise((resolve) => {
-    const reader = entry.createReader();
-    const results = [];
+async function readDirectory(entry) {
+  const reader = entry.createReader();
+  const files = [];
+  let failedCount = 0;
 
-    function readBatch() {
-      reader.readEntries(async (entries) => {
-        if (entries.length === 0) {
-          resolve(results);
-          return;
+  async function readBatch() {
+    const entries = await new Promise(resolve => reader.readEntries(resolve));
+    if (entries.length === 0) return;
+    for (const e of entries) {
+      if (e.isFile) {
+        const file = await new Promise((resolve, reject) => e.file(resolve, reject))
+          .catch(() => null);
+        if (file === null) {
+          failedCount++;
+        } else if (isAudioFile(file.name)) {
+          files.push(file);
         }
-        for (const e of entries) {
-          if (e.isFile) {
-            const file = await new Promise((resolve, reject) => e.file(resolve, reject))
-              .catch(() => null);
-            if (file && isAudioFile(file.name)) results.push(file);
-          } else if (e.isDirectory) {
-            const sub = await readDirectory(e);
-            results.push(...sub);
-          }
-        }
-        readBatch(); // Chrome returns ≤100 entries per call
-      });
+      } else if (e.isDirectory) {
+        const sub = await readDirectory(e);
+        files.push(...sub.files);
+        failedCount += sub.failedCount;
+      }
     }
-    readBatch();
-  });
+    await readBatch(); // Chrome returns ≤100 entries per call
+  }
+
+  await readBatch();
+  return { files, failedCount };
 }
 
 async function handleDrop(e) {
@@ -309,7 +312,12 @@ async function handleDrop(e) {
     if (!entry) continue;
 
     if (entry.isDirectory) {
-      promises.push(readDirectory(entry).then(files => allFiles.push(...files)));
+      promises.push(
+        readDirectory(entry).then(result => {
+          allFiles.push(...result.files);
+          failedCount += result.failedCount;
+        })
+      );
     } else if (entry.isFile) {
       promises.push(
         new Promise((resolve, reject) => entry.file(f => { allFiles.push(f); resolve(); }, reject))
